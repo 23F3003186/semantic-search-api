@@ -1,14 +1,7 @@
 {
-  "builds": [
-    {
-      "src": "api/*.py",
-      "use": "@vercel/python"
+  "functions": {
+    "api/search.py": {
+      "runtime": "python3.12"
     }
-  ],
-  "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "api/search.py"
-    }
-  ]
+  }
 }

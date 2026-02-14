@@ -3,27 +3,26 @@ import time
 import numpy as np
 from fastapi import FastAPI
 from pydantic import BaseModel
-from dotenv import load_dotenv
 from openai import OpenAI
 from docs import documents
 
-load_dotenv()
+# ------------------- FastAPI App -------------------
+app = FastAPI()
 
+# ------------------- OpenAI Client -------------------
 client = OpenAI(
     api_key=os.getenv("OPENAI_API_KEY"),
     base_url="https://aipipe.org/openai/v1"
 )
-app = FastAPI()
 
-
-
+# ------------------- Request Model -------------------
 class SearchRequest(BaseModel):
     query: str
     k: int = 5
     rerank: bool = True
     rerankK: int = 3
 
-
+# ------------------- Embedding Function -------------------
 def get_embedding(text):
     res = client.embeddings.create(
         model="text-embedding-3-small",
@@ -31,20 +30,21 @@ def get_embedding(text):
     )
     return np.array(res.data[0].embedding)
 
-
+# ------------------- Cosine Similarity -------------------
 def cosine(a, b):
     return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
 
+# ------------------- Load Cached Embeddings -------------------
+BASE_DIR = os.path.dirname(__file__)
+CACHE_PATH = os.path.join(BASE_DIR, "..", "embed_cache.npy")
 
-# ---------- Embedding Cache (Vercel Safe) ----------
-if os.path.exists("embed_cache.npy"):
-    print("Loading cached embeddings...")
-    doc_vectors = np.load("embed_cache.npy")
-else:
-    raise RuntimeError(
-        "embed_cache.npy missing — generate locally and commit it"
-    )
+if not os.path.exists(CACHE_PATH):
+    raise RuntimeError("embed_cache.npy not found in deployment")
 
+print("Loading cached embeddings...")
+doc_vectors = np.load(CACHE_PATH)
+
+# ------------------- Re-ranking -------------------
 def rerank_with_llm(query, docs):
     scores = []
 
@@ -71,8 +71,7 @@ Respond with only the number.
 
     return scores
 
-
-
+# ------------------- Vector Search -------------------
 def vector_search(query_vec, k):
     sims = []
 
@@ -82,14 +81,13 @@ def vector_search(query_vec, k):
     sims.sort(key=lambda x: x[1], reverse=True)
     return sims[:k]
 
-
-@app.post("/search")
+# ------------------- API Route -------------------
+@app.post("/api/search")
 def search(req: SearchRequest):
 
     start = time.time()
 
     query_vec = get_embedding(req.query)
-
     top = vector_search(query_vec, req.k)
 
     candidates = []
@@ -103,11 +101,8 @@ def search(req: SearchRequest):
 
     reranked = False
 
-    # ---------- Re-Ranking ----------
     if req.rerank and len(candidates) > 0:
-
         reranked = True
-
         llm_scores = rerank_with_llm(req.query, candidates)
 
         for i in range(len(candidates)):
@@ -126,6 +121,3 @@ def search(req: SearchRequest):
             "totalDocs": len(documents)
         }
     }
-
-
-handler = app
